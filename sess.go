@@ -1062,21 +1062,21 @@ func (c *ICMPConn) WriteTo(b []byte, addr net.Addr) (int, error) {
 }
 
 func (c *ICMPConn) Close() error {
-	return c.Close()
+	return c.conn.Close()
 }
 
 func (c *ICMPConn) LocalAddr() net.Addr {
-	return c.LocalAddr()
+	return c.conn.LocalAddr()
 }
 
 func (c *ICMPConn) SetDeadline(t time.Time) error {
-	return c.SetDeadline(t)
+	return c.conn.SetDeadline(t)
 }
 
 func (c *ICMPConn) SetReadDeadline(t time.Time) error {
-	return c.SetReadDeadline(t)
+	return c.conn.SetReadDeadline(t)
 }
 
 func (c *ICMPConn) SetWriteDeadline(t time.Time) error {
-	return c.SetWriteDeadline(t)
+	return c.conn.SetWriteDeadline(t)
 }
