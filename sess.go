@@ -886,8 +886,8 @@ func (l *Listener) closeSession(remote net.Addr) bool {
 // Addr returns the listener's network address, The Addr returned is shared by all invocations of Addr, so do not modify it.
 func (l *Listener) Addr() net.Addr { return l.conn.LocalAddr() }
 
-// Listen listens for incoming KCP packets addressed to the local address laddr on the network "udp",
-func Listen(laddr string) (net.Listener, error) { return ListenWithOptions(laddr, nil, 0, 0, true) }
+// Listen listens for incoming KCP packets from raddr on the network.
+func Listen(raddr string) (net.Listener, error) { return ListenWithOptions(raddr, nil, 0, 0, true) }
 
 // ListenWithOptions listens for incoming KCP packets addressed to the local address laddr on the network "udp" with packet encryption,
 // dataShards, parityShards defines Reed-Solomon Erasure Coding parameters
