@@ -1020,7 +1020,7 @@ func (c *ICMPConn) ReadFrom(p []byte) (int, net.Addr, error) {
 
 		// if c.sendReplies {
 		// should have received request
-		if msg.Type != ipv4.ICMPTypeEcho {
+		if msg.Type != ipv4.ICMPTypeEchoReply {
 			return 0, addr, errors.New("kcp: ICMPConn.ReadFrom: type is not request")
 		}
 		// } else {
@@ -1037,7 +1037,7 @@ func (c *ICMPConn) ReadFrom(p []byte) (int, net.Addr, error) {
 }
 
 func (c *ICMPConn) WriteTo(b []byte, addr net.Addr) (int, error) {
-	typ := ipv4.ICMPTypeEcho
+	typ := ipv4.ICMPTypeEchoReply
 	// if c.sendReplies {
 	// 	typ = ipv4.ICMPTypeEchoReply
 	// }
