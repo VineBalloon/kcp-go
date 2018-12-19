@@ -1055,6 +1055,8 @@ func (c *ICMPConn) WriteTo(b []byte, addr net.Addr) (int, error) {
 		return 0, err
 	}
 
+	c.seq++
+
 	_, err = c.conn.WriteTo(payload, addr)
 	if err != nil {
 		return 0, err
