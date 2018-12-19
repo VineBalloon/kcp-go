@@ -3,6 +3,7 @@ package kcp
 import (
 	"crypto/rand"
 	"encoding/binary"
+	"encoding/hex"
 	"hash/crc32"
 	"log"
 	"net"
@@ -1001,6 +1002,7 @@ func (c *ICMPConn) ReadFrom(p []byte) (int, net.Addr, error) {
 		if err != nil {
 			return 0, addr, err
 		}
+		log.Println("receiving packet")
 
 		if c.remote.String() != addr.String() {
 			log.Println("dropped packet from unexpected host:", addr.String())
@@ -1032,6 +1034,7 @@ func (c *ICMPConn) ReadFrom(p []byte) (int, net.Addr, error) {
 			return 0, addr, err
 		}
 
+		log.Println("read:", hex.EncodeToString(data))
 		return copy(p, data), addr, nil
 	}
 }
@@ -1041,6 +1044,8 @@ func (c *ICMPConn) WriteTo(b []byte, addr net.Addr) (int, error) {
 	if c.sendReplies {
 		typ = ipv4.ICMPTypeEchoReply
 	}
+
+	log.Println("write:", hex.EncodeToString(b))
 
 	payload, err := (&icmp.Message{
 		Type: typ, Code: 0,
@@ -1057,6 +1062,7 @@ func (c *ICMPConn) WriteTo(b []byte, addr net.Addr) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	log.Println("wrote")
 
 	return len(b), nil
 }
