@@ -1029,13 +1029,10 @@ func (c *ICMPConn) ReadFrom(p []byte) (int, net.Addr, error) {
 			}
 		}
 
-		data, err := msg.Body.Marshal(protocolICMP)
-		if err != nil {
-			return 0, addr, err
-		}
+		body := msg.Body.(*icmp.Echo)
 
-		log.Println("read:", hex.EncodeToString(data))
-		return copy(p, data), addr, nil
+		log.Println("read:", hex.EncodeToString(body.Data))
+		return copy(p, body.Data), addr, nil
 	}
 }
 
