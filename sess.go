@@ -4,12 +4,14 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"hash/crc32"
+	"log"
 	"net"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/pkg/errors"
+	"golang.org/x/net/icmp"
 	"golang.org/x/net/ipv4"
 )
 
@@ -885,18 +887,19 @@ func (l *Listener) closeSession(remote net.Addr) bool {
 func (l *Listener) Addr() net.Addr { return l.conn.LocalAddr() }
 
 // Listen listens for incoming KCP packets addressed to the local address laddr on the network "udp",
-func Listen(laddr string) (net.Listener, error) { return ListenWithOptions(laddr, nil, 0, 0) }
+func Listen(laddr string) (net.Listener, error) { return ListenWithOptions(laddr, nil, 0, 0, true) }
 
 // ListenWithOptions listens for incoming KCP packets addressed to the local address laddr on the network "udp" with packet encryption,
 // dataShards, parityShards defines Reed-Solomon Erasure Coding parameters
-func ListenWithOptions(laddr string, block BlockCrypt, dataShards, parityShards int) (*Listener, error) {
-	udpaddr, err := net.ResolveUDPAddr("udp", laddr)
+func ListenWithOptions(raddr string, block BlockCrypt, dataShards, parityShards int, sendReplies bool) (*Listener, error) {
+	resolvedRAddr, err := net.ResolveIPAddr("ip4:icmp", raddr)
 	if err != nil {
-		return nil, errors.Wrap(err, "net.ResolveUDPAddr")
+		return nil, errors.Wrap(err, "net.ResolveIPAddr")
 	}
-	conn, err := net.ListenUDP("udp", udpaddr)
+
+	conn, err := dialICMPConn(resolvedRAddr, sendReplies)
 	if err != nil {
-		return nil, errors.Wrap(err, "net.ListenUDP")
+		return nil, errors.Wrap(err, "dialICMPConn")
 	}
 
 	return ServeConn(block, dataShards, parityShards, conn)
@@ -928,33 +931,28 @@ func ServeConn(block BlockCrypt, dataShards, parityShards int, conn net.PacketCo
 }
 
 // Dial connects to the remote address "raddr" on the network "udp"
-func Dial(raddr string) (net.Conn, error) { return DialWithOptions(raddr, nil, 0, 0) }
-
-// DialWithOptions connects to the remote address "raddr" on the network "udp" with packet encryption
-func DialWithOptions(raddr string, block BlockCrypt, dataShards, parityShards int) (*UDPSession, error) {
-	udpaddr, err := net.ResolveUDPAddr("udp", raddr)
-	if err != nil {
-		return nil, errors.Wrap(err, "net.ResolveUDPAddr")
-	}
-
-	udpconn, err := net.DialUDP("udp", nil, udpaddr)
-	if err != nil {
-		return nil, errors.Wrap(err, "net.DialUDP")
-	}
-
-	return NewConn(raddr, block, dataShards, parityShards, &connectedUDPConn{udpconn})
-}
+func Dial(raddr string) (net.Conn, error) { return DialWithOptions(raddr, nil, 0, 0, false) }
 
 // NewConn establishes a session and talks KCP protocol over a packet connection.
-func NewConn(raddr string, block BlockCrypt, dataShards, parityShards int, conn net.PacketConn) (*UDPSession, error) {
-	udpaddr, err := net.ResolveUDPAddr("udp", raddr)
-	if err != nil {
-		return nil, errors.Wrap(err, "net.ResolveUDPAddr")
-	}
-
+func NewConn(addr net.Addr, block BlockCrypt, dataShards, parityShards int, conn net.PacketConn) (*UDPSession, error) {
 	var convid uint32
 	binary.Read(rand.Reader, binary.LittleEndian, &convid)
-	return newUDPSession(convid, dataShards, parityShards, nil, conn, udpaddr, block), nil
+	return newUDPSession(convid, dataShards, parityShards, nil, conn, addr, block), nil
+}
+
+// DialWithOptions connects to the remote address "raddr" on the network "udp" with packet encryption
+func DialWithOptions(raddr string, block BlockCrypt, dataShards, parityShards int, sendReplies bool) (*UDPSession, error) {
+	addr, err := net.ResolveIPAddr("ip4:icmp", raddr)
+	if err != nil {
+		return nil, errors.Wrap(err, "net.ResolveIPAddr")
+	}
+
+	conn, err := dialICMPConn(addr, sendReplies)
+	if err != nil {
+		return nil, errors.Wrap(err, "dialICMPConn")
+	}
+
+	return NewConn(addr, block, dataShards, parityShards, conn)
 }
 
 // monotonic reference time point
@@ -970,3 +968,123 @@ type connectedUDPConn struct{ *net.UDPConn }
 
 // WriteTo redirects all writes to the Write syscall, which is 4 times faster.
 func (c *connectedUDPConn) WriteTo(b []byte, addr net.Addr) (int, error) { return c.Write(b) }
+
+type ICMPConn struct {
+	conn        *icmp.PacketConn
+	remote      net.Addr
+	sendReplies bool
+	seq         uint16
+}
+
+func dialICMPConn(remote net.Addr, sendReplies bool) (*ICMPConn, error) {
+	conn, err := icmp.ListenPacket("ip4:icmp", "0.0.0.0")
+	if err != nil {
+		return nil, err
+	}
+
+	return &ICMPConn{
+		conn:        conn,
+		remote:      remote,
+		sendReplies: sendReplies,
+		seq:         0,
+	}, nil
+}
+
+const (
+	protocolICMP = 1
+)
+
+func (c *ICMPConn) ReadFrom(p []byte) (int, net.Addr, error) {
+	for {
+		buf := make([]byte, 2000)
+		n, addr, err := c.conn.ReadFrom(buf)
+		if err != nil {
+			return 0, addr, err
+		}
+
+		if c.remote.String() != addr.String() {
+			log.Println("dropped packet from unexpected host:", addr.String())
+			continue
+		}
+
+		msg, err := icmp.ParseMessage(protocolICMP, buf[:n])
+		if err != nil {
+			return 0, addr, err
+		}
+
+		if msg.Code != 0 {
+			return 0, addr, errors.New("kcp: ICMPConn.ReadFrom: msg.Code not 0")
+		}
+
+		if c.sendReplies {
+			// should have received request
+			if msg.Type != ipv4.ICMPTypeEcho {
+				return 0, addr, errors.New("kcp: ICMPConn.ReadFrom: type is not request")
+			}
+		} else {
+			if msg.Type != ipv4.ICMPTypeEchoReply {
+				return 0, addr, errors.New("kcp: ICMPConn.ReadFrom: type is not reply")
+			}
+		}
+
+		data, err := msg.Body.Marshal(protocolICMP)
+		if err != nil {
+			return 0, addr, err
+		}
+
+		return copy(p, data), addr, nil
+	}
+}
+
+const mtu = 1400
+
+func (c *ICMPConn) WriteTo(b []byte, addr net.Addr) (int, error) {
+	typ := ipv4.ICMPTypeEcho
+	if c.sendReplies {
+		typ = ipv4.ICMPTypeEchoReply
+	}
+
+	l := len(b)
+	if l > mtu {
+		b = b[:mtu]
+		l = mtu
+	}
+
+	payload, err := (&icmp.Message{
+		Type: typ, Code: 0,
+		Body: &icmp.Echo{
+			ID: int(c.seq), Seq: int(c.seq),
+			Data: b,
+		},
+	}).Marshal(nil)
+	if err != nil {
+		return 0, err
+	}
+
+	_, err = c.conn.WriteTo(payload, addr)
+	if err != nil {
+		return 0, err
+	}
+
+	return l, nil
+}
+
+func (c *ICMPConn) Close() error {
+	return c.Close()
+}
+
+func (c *ICMPConn) LocalAddr() net.Addr {
+	return c.LocalAddr()
+}
+
+func (c *ICMPConn) SetDeadline(t time.Time) error {
+	return c.SetDeadline(t)
+}
+
+func (c *ICMPConn) SetReadDeadline(t time.Time) error {
+	return c.SetReadDeadline(t)
+}
+
+func (c *ICMPConn) SetWriteDeadline(t time.Time) error {
+	return c.SetWriteDeadline(t)
+}
