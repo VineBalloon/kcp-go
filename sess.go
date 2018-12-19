@@ -1036,18 +1036,10 @@ func (c *ICMPConn) ReadFrom(p []byte) (int, net.Addr, error) {
 	}
 }
 
-const mtu = 1400
-
 func (c *ICMPConn) WriteTo(b []byte, addr net.Addr) (int, error) {
 	typ := ipv4.ICMPTypeEcho
 	if c.sendReplies {
 		typ = ipv4.ICMPTypeEchoReply
-	}
-
-	l := len(b)
-	if l > mtu {
-		b = b[:mtu]
-		l = mtu
 	}
 
 	payload, err := (&icmp.Message{
@@ -1066,7 +1058,7 @@ func (c *ICMPConn) WriteTo(b []byte, addr net.Addr) (int, error) {
 		return 0, err
 	}
 
-	return l, nil
+	return len(b), nil
 }
 
 func (c *ICMPConn) Close() error {
