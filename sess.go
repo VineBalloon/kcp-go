@@ -4,7 +4,6 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"hash/crc32"
-	"log"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -891,13 +890,8 @@ func Listen(raddr string) (net.Listener, error) { return ListenWithOptions(raddr
 
 // ListenWithOptions listens for incoming KCP packets addressed to the local address laddr on the network "udp" with packet encryption,
 // dataShards, parityShards defines Reed-Solomon Erasure Coding parameters
-func ListenWithOptions(raddr string, block BlockCrypt, dataShards, parityShards int, sendReplies bool) (*Listener, error) {
-	resolvedRAddr, err := net.ResolveIPAddr("ip4:icmp", raddr)
-	if err != nil {
-		return nil, errors.Wrap(err, "net.ResolveIPAddr")
-	}
-
-	conn, err := dialICMPConn(resolvedRAddr, sendReplies)
+func ListenWithOptions(block BlockCrypt, dataShards, parityShards int, sendReplies bool) (*Listener, error) {
+	conn, err := dialICMPConn(nil, sendReplies)
 	if err != nil {
 		return nil, errors.Wrap(err, "dialICMPConn")
 	}
@@ -1002,8 +996,7 @@ func (c *ICMPConn) ReadFrom(p []byte) (int, net.Addr, error) {
 			return 0, addr, err
 		}
 
-		if c.remote.String() != addr.String() {
-			log.Println("dropped packet from unexpected host:", addr.String())
+		if c.remote != nil && (c.remote.String() != addr.String()) {
 			continue
 		}
 
