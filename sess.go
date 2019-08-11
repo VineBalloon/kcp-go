@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"hash/crc32"
+	"log"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -997,44 +998,56 @@ func (c *ICMPConn) ReadFrom(p []byte) (int, net.Addr, error) {
 		}
 
 		if c.remote != nil && (c.remote.String() != addr.String()) {
+			log.Println("kcp: ICMPConn.ReadFrom: ignoring packet")
 			continue
 		}
 
 		msg, err := icmp.ParseMessage(protocolICMP, buf[:n])
 		if err != nil {
+			log.Println("kcp: ICMPConn.ReadFrom: parse error:", err)
 			return 0, addr, err
 		}
 
 		if msg.Code != 0 {
+			log.Println("kcp: ICMPConn.ReadFrom: code is not zero")
 			return 0, addr, errors.New("kcp: ICMPConn.ReadFrom: msg.Code not 0")
 		}
 
-		// if c.sendReplies {
-		// should have received request
-		if msg.Type != ipv4.ICMPTypeEchoReply {
-			return 0, addr, errors.New("kcp: ICMPConn.ReadFrom: type is not request")
+		if c.sendReplies {
+			// should have received request
+			if msg.Type != ipv4.ICMPTypeEchoRequest {
+				log.Println("kcp: ICMPConn.ReadFrom: type is not request")
+				continue
+				// return 0, addr, errors.New("kcp: ICMPConn.ReadFrom: type is not request")
+			}
+		} else {
+			if msg.Type != ipv4.ICMPTypeEchoReply {
+				log.Println("kcp: ICMPConn.ReadFrom: type is not reply")
+				continue
+				// return 0, addr, errors.New("kcp: ICMPConn.ReadFrom: type is not reply")
+			}
 		}
-		// } else {
-		// 	if msg.Type != ipv4.ICMPTypeEchoReply {
-		// 		return 0, addr, errors.New("kcp: ICMPConn.ReadFrom: type is not reply")
-		// 	}
-		// }
 
 		body := msg.Body.(*icmp.Echo)
+		if body.ID != 420 {
+			log.Println("kcp: ICMPConn.ReadFrom: ID is not 420")
+			continue
+		}
+
 		return copy(p, body.Data), addr, nil
 	}
 }
 
 func (c *ICMPConn) WriteTo(b []byte, addr net.Addr) (int, error) {
-	typ := ipv4.ICMPTypeEchoReply
-	// if c.sendReplies {
-	// 	typ = ipv4.ICMPTypeEchoReply
-	// }
+	typ := ipv4.ICMPTypeEchoRequest
+	if c.sendReplies {
+		typ = ipv4.ICMPTypeEchoReply
+	}
 
 	payload, err := (&icmp.Message{
 		Type: typ, Code: 0,
 		Body: &icmp.Echo{
-			ID: int(c.seq), Seq: int(c.seq),
+			ID: 420, Seq: int(c.seq),
 			Data: b,
 		},
 	}).Marshal(nil)
