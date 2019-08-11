@@ -887,7 +887,7 @@ func (l *Listener) closeSession(remote net.Addr) bool {
 func (l *Listener) Addr() net.Addr { return l.conn.LocalAddr() }
 
 // Listen listens for incoming KCP packets from raddr on the network.
-func Listen(raddr string) (net.Listener, error) { return ListenWithOptions(raddr, nil, 0, 0, true) }
+func Listen() (net.Listener, error) { return ListenWithOptions(nil, 0, 0, true) }
 
 // ListenWithOptions listens for incoming KCP packets addressed to the local address laddr on the network "udp" with packet encryption,
 // dataShards, parityShards defines Reed-Solomon Erasure Coding parameters
@@ -1015,7 +1015,7 @@ func (c *ICMPConn) ReadFrom(p []byte) (int, net.Addr, error) {
 
 		if c.sendReplies {
 			// should have received request
-			if msg.Type != ipv4.ICMPTypeEchoRequest {
+			if msg.Type != ipv4.ICMPTypeEcho {
 				log.Println("kcp: ICMPConn.ReadFrom: type is not request")
 				continue
 				// return 0, addr, errors.New("kcp: ICMPConn.ReadFrom: type is not request")
@@ -1039,7 +1039,7 @@ func (c *ICMPConn) ReadFrom(p []byte) (int, net.Addr, error) {
 }
 
 func (c *ICMPConn) WriteTo(b []byte, addr net.Addr) (int, error) {
-	typ := ipv4.ICMPTypeEchoRequest
+	typ := ipv4.ICMPTypeEcho
 	if c.sendReplies {
 		typ = ipv4.ICMPTypeEchoReply
 	}
