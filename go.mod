@@ -1,4 +1,4 @@
-module github.com/vineballoon/kcp-go
+module github.com/VineBalloon/kcp-go
 
 go 1.12
 
