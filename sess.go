@@ -994,10 +994,6 @@ func dialICMPConn(remote net.Addr, sendReplies bool, dev string) (*ICMPConn, err
 	if err != nil {
 		return nil, err
 	}
-	err = handle.SetBPFFilter("host ip " + remote.String())
-	if err != nil {
-		return nil, err
-	}
 	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
 
 	return &ICMPConn{
