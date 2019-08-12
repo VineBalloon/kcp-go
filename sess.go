@@ -10,6 +10,11 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
+
+	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
+	"github.com/google/gopacket/pcap"
+
 	"golang.org/x/net/icmp"
 	"golang.org/x/net/ipv4"
 )
@@ -886,12 +891,12 @@ func (l *Listener) closeSession(remote net.Addr) bool {
 func (l *Listener) Addr() net.Addr { return l.conn.LocalAddr() }
 
 // Listen listens for incoming KCP packets from raddr on the network.
-func Listen() (net.Listener, error) { return ListenWithOptions(nil, 0, 0, true) }
+func Listen() (net.Listener, error) { return ListenWithOptions(nil, 0, 0, true, "") }
 
 // ListenWithOptions listens for incoming KCP packets addressed to the local address laddr on the network "udp" with packet encryption,
 // dataShards, parityShards defines Reed-Solomon Erasure Coding parameters
-func ListenWithOptions(block BlockCrypt, dataShards, parityShards int, sendReplies bool) (*Listener, error) {
-	conn, err := dialICMPConn(nil, sendReplies)
+func ListenWithOptions(block BlockCrypt, dataShards, parityShards int, sendReplies bool, dev string) (*Listener, error) {
+	conn, err := dialICMPConn(nil, sendReplies, dev)
 	if err != nil {
 		return nil, errors.Wrap(err, "dialICMPConn")
 	}
@@ -925,7 +930,9 @@ func ServeConn(block BlockCrypt, dataShards, parityShards int, conn net.PacketCo
 }
 
 // Dial connects to the remote address "raddr" on the network "udp"
-func Dial(raddr string) (net.Conn, error) { return DialWithOptions(raddr, nil, 0, 0, false) }
+//
+// dev refers to the interface you want pcap to listen on
+func Dial(raddr, dev string) (net.Conn, error) { return DialWithOptions(raddr, nil, 0, 0, false, dev) }
 
 // NewConn establishes a session and talks KCP protocol over a packet connection.
 func NewConn(addr net.Addr, block BlockCrypt, dataShards, parityShards int, conn net.PacketConn) (*UDPSession, error) {
@@ -935,13 +942,13 @@ func NewConn(addr net.Addr, block BlockCrypt, dataShards, parityShards int, conn
 }
 
 // DialWithOptions connects to the remote address "raddr" on the network "udp" with packet encryption
-func DialWithOptions(raddr string, block BlockCrypt, dataShards, parityShards int, sendReplies bool) (*UDPSession, error) {
+func DialWithOptions(raddr string, block BlockCrypt, dataShards, parityShards int, sendReplies bool, dev string) (*UDPSession, error) {
 	addr, err := net.ResolveIPAddr("ip4:icmp", raddr)
 	if err != nil {
 		return nil, errors.Wrap(err, "net.ResolveIPAddr")
 	}
 
-	conn, err := dialICMPConn(addr, sendReplies)
+	conn, err := dialICMPConn(addr, sendReplies, dev)
 	if err != nil {
 		return nil, errors.Wrap(err, "dialICMPConn")
 	}
@@ -968,19 +975,32 @@ type ICMPConn struct {
 	remote      net.Addr
 	sendReplies bool
 	seq         uint16
+	packets     chan gopacket.Packet
 }
 
-func dialICMPConn(remote net.Addr, sendReplies bool) (*ICMPConn, error) {
+func dialICMPConn(remote net.Addr, sendReplies bool, dev string) (*ICMPConn, error) {
 	conn, err := icmp.ListenPacket("ip4:icmp", "0.0.0.0")
 	if err != nil {
 		return nil, err
 	}
+
+	// open pcap connection
+	handle, err := pcap.OpenLive(dev, 2000, true, pcap.BlockForever)
+	if err != nil {
+		return nil, err
+	}
+	err = handle.SetBPFFilter("icmp")
+	if err != nil {
+		return nil, err
+	}
+	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
 
 	return &ICMPConn{
 		conn:        conn,
 		remote:      remote,
 		sendReplies: sendReplies,
 		seq:         0,
+		packets:     packetSource.Packets(),
 	}, nil
 }
 
@@ -990,17 +1010,29 @@ const (
 
 func (c *ICMPConn) ReadFrom(p []byte) (int, net.Addr, error) {
 	for {
-		buf := make([]byte, 2000)
-		n, addr, err := c.conn.ReadFrom(buf)
-		if err != nil {
-			return 0, addr, err
+		/*
+			n, addr, err := c.conn.ReadFrom(buf)
+			if err != nil {
+				return 0, addr, err
+			}
+		*/
+		// Read in a packet from our channel
+		packet := <-c.packets
+		ipLayer := packet.Layer(layers.LayerTypeIPv4)
+		if ipLayer == nil {
+			continue
 		}
 
+		ipPacket, _ := ipLayer.(*layers.IPv4)
+
+		addr := &net.IPAddr{
+			IP: ipPacket.SrcIP,
+		}
 		if c.remote != nil && (c.remote.String() != addr.String()) {
 			continue
 		}
 
-		msg, err := icmp.ParseMessage(protocolICMP, buf[:n])
+		msg, err := icmp.ParseMessage(protocolICMP, ipPacket.Payload)
 		if err != nil {
 			return 0, addr, err
 		}
