@@ -975,6 +975,7 @@ type ICMPConn struct {
 	remote      net.Addr
 	sendReplies bool
 	seq         uint16
+	handle      *pcap.Handle
 	packets     chan gopacket.Packet
 }
 
@@ -993,6 +994,10 @@ func dialICMPConn(remote net.Addr, sendReplies bool, dev string) (*ICMPConn, err
 	if err != nil {
 		return nil, err
 	}
+	err = handle.SetBPFFilter("host ip " + remote.String())
+	if err != nil {
+		return nil, err
+	}
 	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
 
 	return &ICMPConn{
@@ -1000,6 +1005,7 @@ func dialICMPConn(remote net.Addr, sendReplies bool, dev string) (*ICMPConn, err
 		remote:      remote,
 		sendReplies: sendReplies,
 		seq:         0,
+		handle:      handle,
 		packets:     packetSource.Packets(),
 	}, nil
 }
@@ -1091,6 +1097,7 @@ func (c *ICMPConn) WriteTo(b []byte, addr net.Addr) (int, error) {
 }
 
 func (c *ICMPConn) Close() error {
+	c.handle.Close()
 	return c.conn.Close()
 }
 
