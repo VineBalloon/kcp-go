@@ -4,7 +4,6 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"hash/crc32"
-	"log"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -998,33 +997,26 @@ func (c *ICMPConn) ReadFrom(p []byte) (int, net.Addr, error) {
 		}
 
 		if c.remote != nil && (c.remote.String() != addr.String()) {
-			log.Println("kcp: ICMPConn.ReadFrom: ignoring packet")
 			continue
 		}
 
 		msg, err := icmp.ParseMessage(protocolICMP, buf[:n])
 		if err != nil {
-			log.Println("kcp: ICMPConn.ReadFrom: parse error:", err)
 			return 0, addr, err
 		}
 
 		if msg.Code != 0 {
-			log.Println("kcp: ICMPConn.ReadFrom: code is not zero")
 			return 0, addr, errors.New("kcp: ICMPConn.ReadFrom: msg.Code not 0")
 		}
-
-		log.Println("receiving", msg.Type)
 
 		if c.sendReplies {
 			// should have received request
 			if msg.Type != ipv4.ICMPTypeEcho {
-				log.Println("kcp: ICMPConn.ReadFrom: type is not request")
 				continue
 				// return 0, addr, errors.New("kcp: ICMPConn.ReadFrom: type is not request")
 			}
 		} else {
 			if msg.Type != ipv4.ICMPTypeEchoReply {
-				log.Println("kcp: ICMPConn.ReadFrom: type is not reply")
 				continue
 				// return 0, addr, errors.New("kcp: ICMPConn.ReadFrom: type is not reply")
 			}
@@ -1032,7 +1024,6 @@ func (c *ICMPConn) ReadFrom(p []byte) (int, net.Addr, error) {
 
 		body := msg.Body.(*icmp.Echo)
 		if body.ID != 420 {
-			log.Println("kcp: ICMPConn.ReadFrom: ID is not 420")
 			continue
 		}
 
@@ -1045,8 +1036,6 @@ func (c *ICMPConn) WriteTo(b []byte, addr net.Addr) (int, error) {
 	if c.sendReplies {
 		typ = ipv4.ICMPTypeEchoReply
 	}
-
-	log.Println("sending", typ)
 
 	payload, err := (&icmp.Message{
 		Type: typ, Code: 0,
